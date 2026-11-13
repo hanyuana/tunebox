@@ -237,14 +237,13 @@ pub fn platform_headers(url: &str) -> HeaderMap {
     if url.contains(".kuwo.cn/") {
         referer = "https://www.kuwo.cn/";
     }
-    if url.contains(".bilibili.com/") || url.contains(".bilivideo.com/") {
+    if url.contains(".bilibili.com/")
+        || url.contains(".bilivideo.")
+        || url.contains("/upgcxcode/")
+        || url.contains(".hdslb.com/")
+    {
         referer = "https://www.bilibili.com/";
         add_origin = false;
-    }
-    if url.contains(".bilivideo.cn") {
-        referer = "https://www.bilibili.com/";
-        origin = "https://www.bilibili.com";
-        add_origin = true;
     }
     if url.contains(".migu.cn") {
         referer = "https://music.migu.cn/v3/music/player/audio?from=migu";

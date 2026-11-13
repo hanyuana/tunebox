@@ -3,7 +3,7 @@
   "identifier": "desktop-capability",
   "description": "Desktop-only capabilities for TuneBox",
   "platforms": ["linux", "macOS", "windows"],
-  "windows": ["main", "lyric"],
+  "windows": ["main"],
   "permissions": [
     "global-shortcut:default"
   ]

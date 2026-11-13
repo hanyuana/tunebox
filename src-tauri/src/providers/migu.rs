@@ -123,13 +123,18 @@ fn convert_song2(song: &Value) -> Track {
 
     let mut quality = val_str(&song["toneControl"]);
     if quality.is_empty() {
-        // 新版 PC 搜索接口通过 audioFormats 标识最高音质，回退推断 toneControl
+        // 新版 PC 搜索接口通过 audioFormats 标识音质；仅当对应音质非 VIP 专享时才选用高码率，否则默认 PQ
         if let Some(formats) = song["audioFormats"].as_array() {
+            let is_free = |f: &Value| val_str(&f["showTagsNew"]).is_empty();
             let has_zq = formats
                 .iter()
-                .any(|f| val_str(&f["formatType"]).starts_with("ZQ"));
-            let has_sq = formats.iter().any(|f| val_str(&f["formatType"]) == "SQ");
-            let has_hq = formats.iter().any(|f| val_str(&f["formatType"]) == "HQ");
+                .any(|f| is_free(f) && val_str(&f["formatType"]).starts_with("ZQ"));
+            let has_sq = formats
+                .iter()
+                .any(|f| is_free(f) && val_str(&f["formatType"]) == "SQ");
+            let has_hq = formats
+                .iter()
+                .any(|f| is_free(f) && val_str(&f["formatType"]) == "HQ");
             if has_zq {
                 quality = "111111".to_string();
             } else if has_sq {

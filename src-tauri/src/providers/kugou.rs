@@ -25,8 +25,22 @@ fn is_status_ok(v: &Value) -> bool {
 }
 
 fn convert_song(song: &Value) -> Track {
-    let file_hash = val_str(&song["FileHash"]);
-    let album_id = val_str(&song["AlbumID"]);
+    let file_hash = {
+        let h = val_str(&song["FileHash"]);
+        if h.is_empty() {
+            val_str(&song["hash"])
+        } else {
+            h
+        }
+    };
+    let album_id = {
+        let a = val_str(&song["AlbumID"]);
+        if a.is_empty() {
+            val_str(&song["album_id"])
+        } else {
+            a
+        }
+    };
 
     let (singer_id, singer_name) = if let Some(arr) = song["SingerId"].as_array() {
         let id = arr.first().map(val_str).unwrap_or_default();
@@ -34,16 +48,50 @@ fn convert_song(song: &Value) -> Track {
         let name = raw_name.split('、').next().unwrap_or_default().to_string();
         (id, name)
     } else {
-        (val_str(&song["SingerId"]), val_str(&song["SingerName"]))
+        let sid = val_str(&song["SingerId"]);
+        let sname = {
+            let s = val_str(&song["SingerName"]);
+            if s.is_empty() {
+                val_str(&song["singername"])
+            } else {
+                s
+            }
+        };
+        (sid, sname)
+    };
+
+    let title = {
+        let t = val_str(&song["SongName"]);
+        if t.is_empty() {
+            val_str(&song["songname"])
+        } else {
+            t
+        }
+    };
+    let album = {
+        let al = val_str(&song["AlbumName"]);
+        if al.is_empty() {
+            val_str(&song["album_name"])
+        } else {
+            al
+        }
     };
 
     let mut track = Track {
         id: format!("kgtrack_{file_hash}"),
-        title: val_str(&song["SongName"]),
+        title,
         artist: singer_name,
-        artist_id: format!("kgartist_{singer_id}"),
-        album: val_str(&song["AlbumName"]),
-        album_id: format!("kgalbum_{album_id}"),
+        artist_id: if singer_id.is_empty() {
+            String::new()
+        } else {
+            format!("kgartist_{singer_id}")
+        },
+        album,
+        album_id: if album_id.is_empty() {
+            String::new()
+        } else {
+            format!("kgalbum_{album_id}")
+        },
         source: "kugou".to_string(),
         source_url: format!("https://www.kugou.com/song/#hash={file_hash}&album_id={album_id}"),
         img_url: String::new(),
@@ -113,6 +161,28 @@ pub async fn search(
             })
         }
         SearchType::Track => {
+            // 优先使用免风控的 mobilecdn 搜索接口，确保始终返回有效 hash
+            let cdn_url = format!(
+                "http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword={encoded_kw}&page={page}&pagesize=20&showtype=1"
+            );
+            if let Ok(data) = http.get_json::<Value>(&cdn_url).await {
+                if let Some(lists) = data["data"]["info"].as_array() {
+                    let tracks: Vec<Track> = lists
+                        .iter()
+                        .map(convert_song)
+                        .filter(|t| t.id != "kgtrack_")
+                        .collect();
+                    if !tracks.is_empty() {
+                        let total = val_u64(&data["data"]["total"]).unwrap_or(tracks.len() as u64);
+                        return Ok(SearchResult {
+                            tracks,
+                            total,
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
             let target_url = format!(
                 "https://songsearch.kugou.com/song_search_v2?keyword={encoded_kw}&page={page}"
             );

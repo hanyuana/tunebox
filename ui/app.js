@@ -479,7 +479,7 @@ function renderTrackTable(tracks, { showSource = true, removableFromListId = nul
         ${tracks
           .map(
             (t, idx) => `
-          <tr class="track-row ${t.disabled ? "disabled" : ""} ${t.id === curId ? "playing" : ""}" data-idx="${idx}">
+          <tr class="track-row ${t.disabled ? "disabled" : ""} ${t.id === curId ? "playing" : ""}" data-idx="${idx}" data-tid="${esc(t.id)}">
             <td>${idx + 1}</td>
             <td title="${esc(t.title)}">${esc(t.title)}</td>
             <td class="${t.artist_id ? "link-cell" : ""}" data-jump="${esc(t.artist_id || "")}" title="${esc(t.artist)}">${esc(t.artist)}</td>
@@ -573,17 +573,20 @@ async function playIndex(idx) {
   const track = state.queue[idx];
   if (!track) return;
 
+  // 切换曲目时先暂停上一首，防止异步请求期间旧音频继续发声
+  audio.pause();
+  document.getElementById("btn-play").textContent = "▶";
+
   // 更新界面信息
   document.getElementById("player-cover").src = coverUrl(track.img_url);
   document.getElementById("player-title").textContent = track.title || "未知歌曲";
   document.getElementById("player-artist").textContent = track.artist || "";
   const badge = document.getElementById("player-badge");
   badge.style.display = "inline-block";
-  badge.textContent = PLATFORM_LABELS[track.source] || track.source;
+  badge.textContent = `${PLATFORM_LABELS[track.source] || track.source} · 解析中…`;
 
   document.querySelectorAll(".track-row").forEach((r) => {
-    const i = Number(r.dataset.idx);
-    r.classList.toggle("playing", state.queue[i]?.id === track.id);
+    r.classList.toggle("playing", r.dataset.tid === track.id);
   });
   renderQueue();
 
@@ -596,11 +599,14 @@ async function playIndex(idx) {
     if (state.queue[state.currentIndex]?.id !== track.id) return;
     if (sound.platform && sound.platform !== track.source) {
       badge.textContent = `${PLATFORM_LABELS[track.source] || track.source} → ${PLATFORM_LABELS[sound.platform] || sound.platform}`;
+    } else {
+      badge.textContent = PLATFORM_LABELS[track.source] || track.source;
     }
     audio.src = sound.url;
     await audio.play();
     document.getElementById("btn-play").textContent = "⏸";
   } catch (e) {
+    badge.textContent = `${PLATFORM_LABELS[track.source] || track.source} · 不可用`;
     toast(`${track.title}: ${e}`);
     // 自动跳下一首（防止死循环：仅当队列大于 1 首时）
     if (state.queue.length > 1) {
@@ -743,10 +749,6 @@ function syncLyric(currentTime) {
   if (activeEl) {
     activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
   }
-  const cur = state.lyrics[idx];
-  if (cur) {
-    invoke("api_send_lyric", { line: cur.text, tline: cur.ttext || "" }).catch(() => {});
-  }
 }
 
 function renderQueue() {
@@ -828,7 +830,6 @@ function fillSettingsForm() {
   setProxyGroup("domestic_mode", "domestic-proxy-url", s.domestic_proxy);
   document.getElementById("chk-auto-source").checked = !!s.auto_choose_source;
   document.getElementById("chk-global-shortcut").checked = !!s.global_shortcut;
-  document.getElementById("chk-close-to-tray").checked = !!s.close_to_tray;
 }
 
 function readProxyGroup(radioName, urlInputId) {
@@ -921,7 +922,7 @@ async function init() {
       domestic_proxy: readProxyGroup("domestic_mode", "domestic-proxy-url"),
       auto_choose_source: document.getElementById("chk-auto-source").checked,
       global_shortcut: document.getElementById("chk-global-shortcut").checked,
-      close_to_tray: document.getElementById("chk-close-to-tray").checked,
+      close_to_tray: false,
     };
     await invoke("api_save_settings", { newSettings });
     state.settings = newSettings;
@@ -958,13 +959,9 @@ async function init() {
     }
   };
 
-  // 主题切换 & 桌面歌词
+  // 主题切换
   document.getElementById("btn-theme").onclick = () => {
     document.body.classList.toggle("light");
-  };
-  document.getElementById("btn-lyric-float").onclick = async () => {
-    state.lyricWinVisible = !state.lyricWinVisible;
-    await invoke("api_toggle_lyric_window", { show: state.lyricWinVisible });
   };
 
   // 右侧抽屉
@@ -1051,9 +1048,6 @@ async function init() {
     if (act === "space") togglePlay();
     else if (act === "left") playPrev();
     else if (act === "right") playNext(false);
-    else if (act === "toggle-lyric") {
-      document.getElementById("btn-lyric-float").click();
-    }
   });
 }
 

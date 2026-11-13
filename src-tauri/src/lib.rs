@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    WindowEvent,
 };
 
 pub struct AppState {
@@ -142,6 +142,21 @@ async fn api_get_playlist(state: State<'_, AppState>, list_id: String) -> Result
         .map_err(|e| e.to_string())
 }
 
+/// 清洗歌名以便跨平台匹配（去除括号附加词与大小写差异）
+fn normalize_song_title(s: &str) -> String {
+    let lower = s.trim().to_lowercase();
+    let base = lower
+        .split(['(', '（', '-', '—', '【', '['])
+        .next()
+        .unwrap_or(&lower)
+        .trim();
+    if base.is_empty() {
+        lower
+    } else {
+        base.to_string()
+    }
+}
+
 /// 获取歌曲可播放地址；若原平台失败且开启了「自动换源」，依次从备选平台搜索同名同歌手曲目替换
 #[tauri::command]
 async fn api_bootstrap_track(state: State<'_, AppState>, track: Track) -> Result<Sound, String> {
@@ -157,29 +172,35 @@ async fn api_bootstrap_track(state: State<'_, AppState>, track: Track) -> Result
         }
     }
 
-    let (auto_choose, failover_list) = {
-        let s = state.settings.read().unwrap();
-        (s.auto_choose_source, s.auto_choose_source_list.clone())
-    };
+    let auto_choose = state.settings.read().map(|s| s.auto_choose_source).unwrap_or(true);
     if !auto_choose || track.source == "youtube" {
         return Err("当前歌曲无法播放（可能为 VIP 专享或无版权）".into());
     }
 
-    let query = format!("{} {}", track.title, track.artist);
-    for src in failover_list {
+    // 固定按全量高可用音源顺序依次兜底（优先酷我与 B站，保证 VIP 曲目也能顺畅播放）
+    let failover_sources = ["kuwo", "bilibili", "netease", "qq", "kugou", "migu"];
+    let clean_title = normalize_song_title(&track.title);
+    let query = if track.artist.trim().is_empty() || track.artist == "未知" {
+        track.title.clone()
+    } else {
+        format!("{} {}", track.title, track.artist)
+    };
+
+    for src in failover_sources {
         if src == track.source {
             continue;
         }
-        let Ok(res) = providers::search(&http, &src, &query, 1, SearchType::Track).await else {
+        let Ok(res) = providers::search(&http, src, &query, 1, SearchType::Track).await else {
             continue;
         };
-        for cand in res.tracks.iter().take(5) {
+        for (idx, cand) in res.tracks.iter().take(6).enumerate() {
             if cand.disabled {
                 continue;
             }
-            let title_match = cand.title.eq_ignore_ascii_case(&track.title)
-                || cand.title.contains(&track.title)
-                || track.title.contains(&cand.title);
+            let cand_clean = normalize_song_title(&cand.title);
+            let title_match = idx == 0
+                || (!clean_title.is_empty()
+                    && (cand_clean.contains(&clean_title) || clean_title.contains(&cand_clean)));
             if !title_match {
                 continue;
             }
@@ -246,43 +267,6 @@ fn api_update_tray(app: AppHandle, title: String, artist: String) {
     let _ = (app, title, artist);
 }
 
-#[tauri::command]
-fn api_toggle_lyric_window(app: AppHandle, show: bool) -> Result<(), String> {
-    #[cfg(desktop)]
-    {
-        if let Some(w) = app.get_webview_window("lyric") {
-            if show {
-                let _ = w.show();
-            } else {
-                let _ = w.hide();
-            }
-            return Ok(());
-        }
-        if !show {
-            return Ok(());
-        }
-        WebviewWindowBuilder::new(&app, "lyric", WebviewUrl::App("lyric.html".into()))
-            .title("桌面歌词")
-            .inner_size(820.0, 86.0)
-            .min_inner_size(420.0, 64.0)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .center()
-            .build()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(not(desktop))]
-    let _ = (app, show);
-    Ok(())
-}
-
-#[tauri::command]
-fn api_send_lyric(app: AppHandle, line: String, tline: String) {
-    let _ = app.emit("lyric-update", serde_json::json!({ "line": line, "tline": tline }));
-}
-
 #[cfg(desktop)]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let i_show = MenuItem::with_id(app, "show", "显示 / 隐藏主窗口", true, None::<&str>)?;
@@ -290,13 +274,12 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let i_play = MenuItem::with_id(app, "space", "播放 / 暂停", true, None::<&str>)?;
     let i_prev = MenuItem::with_id(app, "left", "上一首", true, None::<&str>)?;
     let i_next = MenuItem::with_id(app, "right", "下一首", true, None::<&str>)?;
-    let i_lyric = MenuItem::with_id(app, "lyric", "开关桌面歌词", true, None::<&str>)?;
     let i_sep2 = PredefinedMenuItem::separator(app)?;
     let i_quit = MenuItem::with_id(app, "quit", "退出 TuneBox", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[&i_show, &i_sep, &i_play, &i_prev, &i_next, &i_lyric, &i_sep2, &i_quit],
+        &[&i_show, &i_sep, &i_play, &i_prev, &i_next, &i_sep2, &i_quit],
     )?;
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
@@ -308,11 +291,8 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             "space" | "left" | "right" => {
                 let _ = app.emit("global-shortcut", ev.id().as_ref());
             }
-            "lyric" => {
-                let _ = app.emit("global-shortcut", "toggle-lyric");
-            }
             "quit" => {
-                app.exit(0);
+                std::process::exit(0);
             }
             _ => {}
         })
@@ -421,18 +401,9 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.on_window_event(|window, event| {
         if window.label() == "main" {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let close_to_tray = window
-                    .app_handle()
-                    .state::<AppState>()
-                    .settings
-                    .read()
-                    .map(|s| s.close_to_tray)
-                    .unwrap_or(true);
-                if close_to_tray {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed) {
+                // 关闭主窗口或任务栏右击关闭时直接彻底退出进程，不残留后台进程
+                std::process::exit(0);
             }
         }
     });
@@ -449,8 +420,6 @@ pub fn run() {
             api_parse_url,
             api_save_settings,
             api_update_tray,
-            api_toggle_lyric_window,
-            api_send_lyric,
         ])
         .run(tauri::generate_context!())
         .expect("启动 TuneBox 失败");

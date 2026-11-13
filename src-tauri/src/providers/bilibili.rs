@@ -422,6 +422,7 @@ pub async fn parse_url(_http: &Http, url: &str) -> Option<String> {
 }
 
 pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
+    ensure_buvid(http).await;
     let track_id = track.id.as_str();
     if let Some(rest) = track_id.strip_prefix("bitrack_v_") {
         let (bvid, cid_from_id) = match rest.split_once('-') {
@@ -429,20 +430,27 @@ pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
             _ => (rest, None),
         };
 
-        let view_url = format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
         let cid = match cid_from_id.or_else(|| track.extra_str("cid").map(|s| s.to_string())) {
-            Some(c) if !c.is_empty() => {
-                // 保持与原版一致，仍可正常通过 cid 获取音频流
-                c
-            }
+            Some(c) if !c.is_empty() => c,
             _ => {
-                let v: Value = http.get_json(&view_url).await?;
-                let c = val_to_string(&v["data"]["pages"][0]["cid"]);
-                if c.is_empty() {
-                    val_to_string(&v["data"]["cid"])
-                } else {
-                    c
+                // 优先调用轻量免风控的 pagelist 接口获取 cid，避免 view 接口返回 412
+                let pagelist_url =
+                    format!("https://api.bilibili.com/x/player/pagelist?bvid={bvid}");
+                let mut resolved_cid = String::new();
+                if let Ok(vp) = http.get_json::<Value>(&pagelist_url).await {
+                    resolved_cid = val_to_string(&vp["data"][0]["cid"]);
                 }
+                if resolved_cid.is_empty() {
+                    let view_url =
+                        format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
+                    if let Ok(v) = http.get_json::<Value>(&view_url).await {
+                        resolved_cid = val_to_string(&v["data"]["pages"][0]["cid"]);
+                        if resolved_cid.is_empty() {
+                            resolved_cid = val_to_string(&v["data"]["cid"]);
+                        }
+                    }
+                }
+                resolved_cid
             }
         };
 

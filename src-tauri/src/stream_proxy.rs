@@ -59,7 +59,6 @@ async fn handle_stream(
         .header("Access-Control-Allow-Origin", "*");
 
     for name in [
-        "content-type",
         "content-length",
         "content-range",
         "accept-ranges",
@@ -70,6 +69,30 @@ async fn handle_stream(
                 builder = builder.header(name, hv);
             }
         }
+    }
+
+    // 修正常见 CDN 返回 application/octet-stream 或 video/mp4 导致 WebView <audio> 拒绝解码的问题
+    let raw_ct = upstream
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let fixed_ct = if raw_ct.is_empty()
+        || raw_ct.contains("octet-stream")
+        || raw_ct.starts_with("video/mp4")
+    {
+        if q.url.contains(".mp3") {
+            "audio/mpeg"
+        } else if q.url.contains(".flac") {
+            "audio/flac"
+        } else {
+            "audio/mp4"
+        }
+    } else {
+        raw_ct
+    };
+    if let Ok(hv) = HeaderValue::from_str(fixed_ct) {
+        builder = builder.header("content-type", hv);
     }
 
     let stream = upstream.bytes_stream();

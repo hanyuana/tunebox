@@ -480,7 +480,24 @@ pub async fn get_playlist(http: &Http, list_id: &str) -> Result<Playlist> {
 pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
     let song_id = track.id.strip_prefix("kwtrack_").unwrap_or(&track.id);
 
-    // 1. 原版 kuwo.js 使用的 web playUrl 接口
+    // 1. 优先使用速度最快、成功率最高的酷我 antiserver 接口
+    for proto in ["http", "https"] {
+        let anti_url = format!(
+            "{proto}://antiserver.kuwo.cn/anti.s?type=convert_url&rid=MUSIC_{song_id}&format=mp3|aac&response=url"
+        );
+        if let Ok(text) = http.get_text(&anti_url).await {
+            let trimmed = text.trim();
+            if trimmed.starts_with("http") {
+                return Ok(Sound {
+                    url: trimmed.to_string(),
+                    bitrate: "128kbps".to_string(),
+                    platform: "kuwo".to_string(),
+                });
+            }
+        }
+    }
+
+    // 2. 备选：web playUrl 接口
     let target_url = format!(
         "https://www.kuwo.cn/api/v1/www/music/playUrl?mid={song_id}&type=music&httpsStatus=1&reqId=&plat=web_www&from="
     );
@@ -489,21 +506,6 @@ pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
         if url.starts_with("http") {
             return Ok(Sound {
                 url,
-                bitrate: String::new(),
-                platform: "kuwo".to_string(),
-            });
-        }
-    }
-
-    // 2. 备选：酷我 antiserver 接口
-    let anti_url = format!(
-        "https://antiserver.kuwo.cn/anti.s?type=convert_url&rid=MUSIC_{song_id}&format=mp3|aac&response=url"
-    );
-    if let Ok(text) = http.get_text(&anti_url).await {
-        let trimmed = text.trim();
-        if trimmed.starts_with("http") {
-            return Ok(Sound {
-                url: trimmed.to_string(),
                 bitrate: String::new(),
                 platform: "kuwo".to_string(),
             });
