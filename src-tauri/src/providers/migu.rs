@@ -1,4 +1,4 @@
-//! 咪咕音乐（migu）平台实现，移植自 `_ref/listen1_ext/js/provider/migu.js`。
+//! 咪咕音乐（Migu）音源实现。
 use crate::http::{urlencode, Http};
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};

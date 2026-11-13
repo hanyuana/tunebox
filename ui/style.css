@@ -1,30 +1,34 @@
 :root {
-  --bg: #0f1117;
-  --bg-elev: #171a24;
-  --bg-card: #1d2230;
-  --bg-hover: #252b3d;
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #eef1f7;
-  --text-muted: #939bb2;
-  --accent: #ef4444;
-  --accent-hover: #f87171;
-  --badge-bg: rgba(239, 68, 68, 0.16);
-  --badge-fg: #fca5a5;
-  --player-h: 78px;
+  --bg: #0b0f19;
+  --bg-elev: #111827;
+  --bg-card: #1a2336;
+  --bg-hover: #243049;
+  --border: rgba(148, 163, 184, 0.12);
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --accent: #06b6d4;
+  --accent-2: #6366f1;
+  --accent-grad: linear-gradient(135deg, #06b6d4, #6366f1);
+  --accent-hover: #22d3ee;
+  --badge-bg: rgba(6, 182, 212, 0.16);
+  --badge-fg: #67e8f9;
+  --player-h: 80px;
 }
 
 body.light {
-  --bg: #f6f7fb;
+  --bg: #f1f5f9;
   --bg-elev: #ffffff;
-  --bg-card: #f0f2f8;
-  --bg-hover: #e5e8f2;
-  --border: rgba(0, 0, 0, 0.08);
-  --text: #1c2030;
-  --text-muted: #667085;
-  --accent: #e11d48;
-  --accent-hover: #be123c;
-  --badge-bg: rgba(225, 29, 72, 0.12);
-  --badge-fg: #e11d48;
+  --bg-card: #e2e8f0;
+  --bg-hover: #cbd5e1;
+  --border: rgba(15, 23, 42, 0.09);
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #0891b2;
+  --accent-2: #4f46e5;
+  --accent-grad: linear-gradient(135deg, #0891b2, #4f46e5);
+  --accent-hover: #0e7490;
+  --badge-bg: rgba(8, 145, 178, 0.13);
+  --badge-fg: #0891b2;
 }
 
 * {
@@ -76,10 +80,11 @@ html, body {
 }
 
 .brand-logo {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #ef4444, #f97316);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-grad);
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.32);
   color: #fff;
   font-size: 19px;
   font-weight: 700;
@@ -694,3 +699,53 @@ input[type="range"] {
   z-index: 200;
 }
 .toast.show { opacity: 1; }
+
+/* 移动端底部导航与 Android 屏幕响应式适配 */
+.mobile-bottom-nav {
+  display: none;
+  height: 50px;
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  justify-content: space-around;
+  align-items: center;
+  flex-shrink: 0;
+}
+.m-nav-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.m-nav-btn.active {
+  color: var(--accent);
+  background: var(--badge-bg);
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .mobile-bottom-nav { display: flex; }
+  .right-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: var(--player-h);
+    width: 86vw;
+    max-width: 320px;
+    z-index: 90;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+  }
+  .topbar { padding: 0 12px; height: 50px; }
+  #btn-lyric-float { display: none; }
+  .content-scroll { padding: 12px 12px 20px; }
+  .playlist-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .playlist-header { flex-direction: column; align-items: center; text-align: center; gap: 12px; }
+  .playlist-header-actions { justify-content: center; }
+  .player-bar { padding: 0 10px; gap: 8px; }
+  .player-track { width: 135px; }
+  .player-right .vol-icon, .player-right .vol-range { display: none; }
+  .player-right { width: auto; }
+}

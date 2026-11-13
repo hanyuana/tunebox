@@ -1,4 +1,4 @@
-//! QQ 音乐平台实现（移植自 `_ref/listen1_ext/js/provider/qq.js`）。
+//! QQ 音乐（QQ Music）音源实现。
 use crate::http::{ parse_json, query_param, urlencode, Http };
 use crate::models::*;
 use anyhow::{ anyhow, bail, Result };

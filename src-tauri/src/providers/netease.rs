@@ -1,4 +1,4 @@
-//! 网易云音乐 provider（移植自 `listen1_ext/js/provider/netease.js`）。
+//! 网易云音乐（NetEase）音源实现（weapi / eapi AES+RSA 加密）。
 use crate::http::{query_param, urlencode, Http};
 use crate::models::*;
 use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyInit, KeyIvInit};

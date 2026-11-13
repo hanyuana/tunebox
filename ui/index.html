@@ -11,23 +11,31 @@
     <!-- 左侧边栏 -->
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-logo">♫</div>
+        <div class="brand-logo" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <line x1="4" y1="9" x2="4" y2="15"></line>
+            <line x1="8" y1="6" x2="8" y2="18"></line>
+            <line x1="12" y1="3" x2="12" y2="21"></line>
+            <line x1="16" y1="7" x2="16" y2="17"></line>
+            <line x1="20" y1="10" x2="20" y2="14"></line>
+          </svg>
+        </div>
         <div>
           <div class="brand-title">TuneBox</div>
-          <div class="brand-sub">音盒 · Rust 轻量版</div>
+          <div class="brand-sub">音盒 · 极光轻量版</div>
         </div>
       </div>
 
       <div class="nav-group">
-        <div class="nav-section-title">发现音乐</div>
+        <div class="nav-section-title">音乐空间</div>
         <button class="nav-item active" data-nav="explore">
-          <span class="nav-icon">❖</span><span>精选歌单</span>
+          <span class="nav-icon">✦</span><span>灵感广场</span>
         </button>
         <button class="nav-item" data-nav="search">
-          <span class="nav-icon">⌕</span><span>全网搜索</span>
+          <span class="nav-icon">⌕</span><span>聚合检索</span>
         </button>
         <button class="nav-item" data-nav="open-url">
-          <span class="nav-icon">🔗</span><span>链接打开歌单</span>
+          <span class="nav-icon">🔗</span><span>链接直达</span>
         </button>
       </div>
 
@@ -155,8 +163,8 @@
           </div>
 
           <div class="card-panel">
-            <h2>歌单备份与迁移（兼容原版 Listen1 JSON）</h2>
-            <p class="muted">可导出自建与收藏歌单为 JSON 文件，或从原版 Listen1 导出的备份文件恢复。</p>
+            <h2>歌单数据备份与迁移</h2>
+            <p class="muted">可将本地自建歌单与收藏歌单导出为通用 JSON 备份文件，或从已导出的 JSON 文件一键恢复。</p>
             <div class="form-actions">
               <button class="btn-ghost" id="btn-export-backup">导出备份文件</button>
               <label class="btn-ghost file-label">
@@ -167,6 +175,14 @@
           </div>
         </section>
       </div>
+
+      <!-- 移动端底部导航栏（仅在手机/窄屏下显示） -->
+      <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+        <button class="m-nav-btn active" data-nav="explore">✦ 广场</button>
+        <button class="m-nav-btn" data-nav="search">⌕ 搜索</button>
+        <button class="m-nav-btn" data-nav="open-url">🔗 链接</button>
+        <button class="m-nav-btn" data-nav="settings">⚙ 设置</button>
+      </nav>
     </main>
 
     <!-- 右侧抽屉：歌词 / 播放队列 -->

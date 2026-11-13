@@ -1,4 +1,4 @@
-//! 通用数据结构。字段名尽量与原版 listen1 保持一致，方便前端与导入导出兼容。
+//! TuneBox 统一数据结构定义（支持多平台曲目、歌单、歌词及 JSON 备份导入导出）。
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 

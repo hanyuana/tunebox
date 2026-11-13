@@ -1,4 +1,4 @@
-//! Bilibili 平台实现（忠实移植自 `_ref/listen1_ext/js/provider/bilibili.js`）。
+//! 哔哩哔哩（Bilibili）音频与视频分 P 音源实现（WBI 签名）。
 use crate::http::{urlencode, Http};
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};

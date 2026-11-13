@@ -1,12 +1,12 @@
-// Listen 1 (Rust + Tauri 2) 原生前端
+// TuneBox (音盒) — Rust + Tauri 2 原生前端
 const { core, event } = window.__TAURI__;
 const invoke = (cmd, args) => core.invoke(cmd, args);
 
-// 默认占位封面（内联 SVG）
+// 默认占位封面（内联极光声波 SVG）
 const DEFAULT_COVER =
   "data:image/svg+xml;utf8," +
   encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="#232838"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#6b7280" font-size="42">♫</text></svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#1e1b4b"/></linearGradient></defs><rect width="120" height="120" fill="url(#g)"/><g stroke="#22d3ee" stroke-width="5" stroke-linecap="round"><line x1="38" y1="50" x2="38" y2="70"/><line x1="49" y1="40" x2="49" y2="80"/><line x1="60" y1="32" x2="60" y2="88"/><line x1="71" y1="43" x2="71" y2="77"/><line x1="82" y1="52" x2="82" y2="68"/></g></svg>`
   );
 
 const PLATFORM_LABELS = {
@@ -83,7 +83,7 @@ function esc(str) {
     .replace(/"/g, "&quot;");
 }
 
-// ========== 本地自建歌单与收藏歌单（兼容原版 Listen1 localStorage 格式） ==========
+// ========== 本地自建歌单与收藏歌单存储 ==========
 function getObj(key, def) {
   try {
     const raw = localStorage.getItem(key);
@@ -197,7 +197,7 @@ function switchView(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   const target = document.getElementById(`view-${name}`);
   if (target) target.classList.add("active");
-  document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach((b) => {
+  document.querySelectorAll(".sidebar .nav-item[data-nav], .mobile-bottom-nav .m-nav-btn[data-nav]").forEach((b) => {
     b.classList.toggle("active", b.dataset.nav === name);
   });
   document.getElementById("content-scroll").scrollTop = 0;
@@ -854,8 +854,8 @@ async function init() {
   await loadExploreFilters();
   await loadExplorePlaylists(false);
 
-  // 左侧导航切换
-  document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach((btn) => {
+  // 左侧导航与移动端底部导航切换
+  document.querySelectorAll(".sidebar .nav-item[data-nav], .mobile-bottom-nav .m-nav-btn[data-nav]").forEach((btn) => {
     btn.onclick = () => switchView(btn.dataset.nav);
   });
 

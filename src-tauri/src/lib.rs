@@ -10,10 +10,13 @@ use crate::settings::Settings;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 pub struct AppState {
@@ -213,18 +216,24 @@ fn api_save_settings(
     state
         .http
         .reconfigure(&new_settings.domestic_proxy, &new_settings.overseas_proxy);
+    #[cfg(desktop)]
     let shortcut_changed = state.settings.read().unwrap().global_shortcut != new_settings.global_shortcut;
+    #[cfg(desktop)]
     let enable_sc = new_settings.global_shortcut;
     *state.settings.write().unwrap() = new_settings.clone();
     new_settings.save(&state.settings_path);
+    #[cfg(desktop)]
     if shortcut_changed {
         update_shortcuts(&app, enable_sc);
     }
+    #[cfg(not(desktop))]
+    let _ = &app;
     Ok(())
 }
 
 #[tauri::command]
 fn api_update_tray(app: AppHandle, title: String, artist: String) {
+    #[cfg(desktop)]
     if let Some(tray) = app.tray_by_id("main-tray") {
         let tip = if artist.trim().is_empty() {
             format!("TuneBox - {title}")
@@ -233,32 +242,39 @@ fn api_update_tray(app: AppHandle, title: String, artist: String) {
         };
         let _ = tray.set_tooltip(Some(tip.as_str()));
     }
+    #[cfg(not(desktop))]
+    let _ = (app, title, artist);
 }
 
 #[tauri::command]
 fn api_toggle_lyric_window(app: AppHandle, show: bool) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("lyric") {
-        if show {
-            let _ = w.show();
-        } else {
-            let _ = w.hide();
+    #[cfg(desktop)]
+    {
+        if let Some(w) = app.get_webview_window("lyric") {
+            if show {
+                let _ = w.show();
+            } else {
+                let _ = w.hide();
+            }
+            return Ok(());
         }
-        return Ok(());
+        if !show {
+            return Ok(());
+        }
+        WebviewWindowBuilder::new(&app, "lyric", WebviewUrl::App("lyric.html".into()))
+            .title("桌面歌词")
+            .inner_size(820.0, 86.0)
+            .min_inner_size(420.0, 64.0)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .center()
+            .build()
+            .map_err(|e| e.to_string())?;
     }
-    if !show {
-        return Ok(());
-    }
-    WebviewWindowBuilder::new(&app, "lyric", WebviewUrl::App("lyric.html".into()))
-        .title("桌面歌词")
-        .inner_size(820.0, 86.0)
-        .min_inner_size(420.0, 64.0)
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
+    #[cfg(not(desktop))]
+    let _ = (app, show);
     Ok(())
 }
 
@@ -267,6 +283,7 @@ fn api_send_lyric(app: AppHandle, line: String, tline: String) {
     let _ = app.emit("lyric-update", serde_json::json!({ "line": line, "tline": tline }));
 }
 
+#[cfg(desktop)]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let i_show = MenuItem::with_id(app, "show", "显示 / 隐藏主窗口", true, None::<&str>)?;
     let i_sep = PredefinedMenuItem::separator(app)?;
@@ -317,6 +334,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(desktop)]
 fn toggle_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let visible = w.is_visible().unwrap_or(true);
@@ -331,6 +349,7 @@ fn toggle_main_window(app: &AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn update_shortcuts(app: &AppHandle, enable: bool) {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
     let gs = app.global_shortcut();
@@ -356,8 +375,12 @@ fn update_shortcuts(app: &AppHandle, enable: bool) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -365,47 +388,56 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .setup(|app| {
-            let cfg_dir = app
-                .path()
-                .app_config_dir()
-                .unwrap_or_else(|_| std::env::temp_dir().join("tunebox"));
-            let settings_path = cfg_dir.join("settings.json");
-            let settings = Settings::load(&settings_path);
-            let http = Arc::new(Http::new(&settings.domestic_proxy, &settings.overseas_proxy));
-            let stream_port = tauri::async_runtime::block_on(stream_proxy::spawn_stream_server(http.clone()));
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
-            let enable_sc = settings.global_shortcut;
-            app.manage(AppState {
-                http,
-                settings: RwLock::new(settings),
-                settings_path,
-                stream_port,
-            });
+    let builder = builder.setup(|app| {
+        let cfg_dir = app
+            .path()
+            .app_config_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("tunebox"));
+        let settings_path = cfg_dir.join("settings.json");
+        let settings = Settings::load(&settings_path);
+        let http = Arc::new(Http::new(&settings.domestic_proxy, &settings.overseas_proxy));
+        let stream_port = tauri::async_runtime::block_on(stream_proxy::spawn_stream_server(http.clone()));
 
+        #[cfg(desktop)]
+        let enable_sc = settings.global_shortcut;
+
+        app.manage(AppState {
+            http,
+            settings: RwLock::new(settings),
+            settings_path,
+            stream_port,
+        });
+
+        #[cfg(desktop)]
+        {
             let _ = setup_tray(app.handle());
             update_shortcuts(app.handle(), enable_sc);
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            if window.label() == "main" {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    let close_to_tray = window
-                        .app_handle()
-                        .state::<AppState>()
-                        .settings
-                        .read()
-                        .map(|s| s.close_to_tray)
-                        .unwrap_or(true);
-                    if close_to_tray {
-                        api.prevent_close();
-                        let _ = window.hide();
-                    }
+        }
+        Ok(())
+    });
+
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if window.label() == "main" {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let close_to_tray = window
+                    .app_handle()
+                    .state::<AppState>()
+                    .settings
+                    .read()
+                    .map(|s| s.close_to_tray)
+                    .unwrap_or(true);
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
-        })
+        }
+    });
+
+    builder
         .invoke_handler(tauri::generate_handler![
             api_init,
             api_search,
