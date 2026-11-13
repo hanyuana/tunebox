@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-capability",
+  "description": "Desktop-only capabilities for TuneBox",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main", "lyric"],
+  "permissions": [
+    "global-shortcut:default"
+  ]
+}
