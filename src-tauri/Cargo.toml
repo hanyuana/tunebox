@@ -23,7 +23,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "process"] }
-reqwest = { version = "0.12", features = ["json", "cookies", "gzip", "brotli", "deflate", "socks", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "cookies", "gzip", "brotli", "deflate", "socks", "stream"] }
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
 futures-util = { version = "0.3", features = ["std"] }
 url = "2"
@@ -43,10 +43,6 @@ num-bigint = "0.4"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
-
-# Android 端启用 rustls-tls 以免依赖外部 OpenSSL 交叉编译
-[target.'cfg(target_os = "android")'.dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "cookies", "gzip", "brotli", "deflate", "socks", "stream"] }
 
 [profile.release]
 codegen-units = 1
