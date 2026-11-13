@@ -23,13 +23,14 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK Platform & NDK
+      - name: Configure Preinstalled Android SDK & NDK
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
 
@@ -38,8 +39,9 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0" --locked
+      - name: Install Prebuilt Tauri CLI v2
+        run: |
+          curl -fsSL https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.5.0/cargo-tauri-x86_64-unknown-linux-gnu.tgz | tar -xz -C ~/.cargo/bin
 
       - name: Init & Build Signed Android APK
         working-directory: src-tauri
@@ -55,6 +57,7 @@ jobs:
 
           # 生成签名密钥并对 APK 进行 v1+v2+v3 签名，确保手机可直接点击安装
           UNSIGNED_APK=$(find gen/android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          echo "Found built APK: $UNSIGNED_APK"
           keytool -genkeypair -v -keystore tunebox.keystore -alias tunebox -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass tunebox123 -keypass tunebox123 -dname "CN=TuneBox, OU=Dev, O=TuneBox, L=CN, S=CN, C=CN"
           $ANDROID_HOME/build-tools/34.0.0/zipalign -v -p 4 "$UNSIGNED_APK" TuneBox-v0.1.0-android-arm64.apk
