@@ -1,0 +1,45 @@
+[package]
+name = "tunebox"
+version = "0.1.0"
+description = "TuneBox (音盒) - 聚合音乐播放器（Rust + Tauri 轻量版）"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "tunebox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "process"] }
+reqwest = { version = "0.12", features = ["json", "cookies", "gzip", "brotli", "deflate", "socks", "stream"] }
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+url = "2"
+regex-lite = "0.1"
+rand = "0.8"
+# 加解密（网易云 weapi/eapi、酷我、B站 wbi 等）
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+ecb = { version = "0.1", features = ["alloc"] }
+md-5 = "0.10"
+sha1 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+num-bigint = "0.4"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
