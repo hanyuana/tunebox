@@ -1,7 +1,7 @@
 //! 酷我音乐 provider，忠实移植自 `_ref/listen1_ext/js/provider/kuwo.js`。
 use crate::http::{parse_json, query_param, urlencode, Http};
 use crate::models::*;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use regex_lite::Regex;
 use serde_json::Value;
 

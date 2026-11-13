@@ -231,7 +231,7 @@ fn api_update_tray(app: AppHandle, title: String, artist: String) {
         } else {
             format!("TuneBox - {title} - {artist}")
         };
-        let _ = tray.set_tooltip(Some(tip));
+        let _ = tray.set_tooltip(Some(tip.as_str()));
     }
 }
 
