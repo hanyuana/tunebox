@@ -1,0 +1,74 @@
+name: Build Android APK & Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Platform & NDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager --install "ndk;27.0.12077973" "platforms;android-34" "build-tools;34.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - name: Setup Rust & Android Target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0" --locked
+
+      - name: Init & Build Signed Android APK
+        working-directory: src-tauri
+        run: |
+          sed -i 's/crate-type = \["rlib"\]/crate-type = ["staticlib", "cdylib", "rlib"]/' Cargo.toml
+          cargo tauri android init
+          # 允许本地 127.0.0.1 流代理与各平台 HTTP 音频流访问
+          MANIFEST="gen/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ] && ! grep -q "usesCleartextTraffic" "$MANIFEST"; then
+            sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$MANIFEST"
+          fi
+          cargo tauri android build --apk --target aarch64
+
+          # 生成签名密钥并对 APK 进行 v1+v2+v3 签名，确保手机可直接点击安装
+          UNSIGNED_APK=$(find gen/android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          keytool -genkeypair -v -keystore tunebox.keystore -alias tunebox -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass tunebox123 -keypass tunebox123 -dname "CN=TuneBox, OU=Dev, O=TuneBox, L=CN, S=CN, C=CN"
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -v -p 4 "$UNSIGNED_APK" TuneBox-v0.1.0-android-arm64.apk
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks tunebox.keystore --ks-pass pass:tunebox123 \
+            --key-pass pass:tunebox123 TuneBox-v0.1.0-android-arm64.apk
+
+      - name: Upload Android APK to Actions Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TuneBox-v0.1.0-android-arm64-apk
+          path: src-tauri/TuneBox-v0.1.0-android-arm64.apk
+
+      - name: Attach Android APK to GitHub Release v0.1.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v0.1.0 src-tauri/TuneBox-v0.1.0-android-arm64.apk --clobber || true
