@@ -106,11 +106,6 @@ fn val_str(v: &Value) -> String {
     }
 }
 
-fn is_playable(song: &Value) -> bool {
-    let fee = song["fee"].as_i64().unwrap_or(0);
-    fee != 4 && fee != 1
-}
-
 /// 解析 `/weapi/v3/song/detail` 返回的单曲（字段为 `ar` / `al`）
 fn parse_v3_track(track_json: &Value) -> Track {
     let id = val_str(&track_json["id"]);

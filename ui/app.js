@@ -711,6 +711,22 @@ function renderTrackTable(tracks, { showSource = true, removableFromListId = nul
   `;
 }
 
+function playSingleTrack(track) {
+  if (!track) return;
+  const existIdx = state.queue.findIndex((q) => q.id === track.id);
+  if (existIdx >= 0) {
+    playIndex(existIdx);
+  } else if (state.currentIndex >= 0 && state.currentIndex < state.queue.length) {
+    const insertIdx = state.currentIndex + 1;
+    state.queue.splice(insertIdx, 0, track);
+    playIndex(insertIdx);
+  } else {
+    state.queue.push(track);
+    playIndex(state.queue.length - 1);
+  }
+  renderQueue();
+}
+
 function bindTrackTableEvents(container, tracks, removableFromListId = null) {
   let lastClickTid = "";
   let lastClickTime = 0;
@@ -729,9 +745,8 @@ function bindTrackTableEvents(container, tracks, removableFromListId = null) {
       lastClickTid = track.id;
       lastClickTime = now;
 
-      state.queue = [...tracks];
-      playIndex(idx);
-      renderQueue();
+      // 单曲点击仅将该首歌曲加入右侧播放列表并播放，不再把整页搜索结果全部塞入队列
+      playSingleTrack(track);
     };
     row.addEventListener("click", handleRowActivate);
     row.addEventListener("dblclick", handleRowActivate);
