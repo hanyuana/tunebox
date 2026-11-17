@@ -270,7 +270,11 @@ fn bi_convert_song3(song_info: &Value, bvid: &str, author: &Value, default_img: 
 }
 
 pub async fn show_playlist(http: &Http, offset: u32, _filter_id: &str) -> Result<Vec<PlaylistInfo>> {
-    let page = offset / 20 + 1;
+    // B站音频区 menu/hit 仅有一页固定歌单，offset > 0 时返回空以避免「加载更多」重复
+    if offset > 0 {
+        return Ok(Vec::new());
+    }
+    let page = 1;
     let target_url =
         format!("https://www.bilibili.com/audio/music-service-c/web/menu/hit?ps=20&pn={page}");
     let v: Value = http.get_json(&target_url).await?;
@@ -530,37 +534,37 @@ pub async fn search(
 
     ensure_buvid(http).await;
 
-    let encoded_kw = encode_uri_component(keyword);
-    let target_url = format!(
-        "https://api.bilibili.com/x/web-interface/search/type?__refresh__=true&_extra=&context=&page={page}&page_size=42&platform=pc&highlight=1&single_column=0&keyword={encoded_kw}&category_id=&search_type=video&dynamic_offset=0&preload=true&com2co=true"
-    );
+    // 优先使用 WBI 签名搜索接口，避免未签名接口返回 412 触发风控冷却
+    let mut v = wrap_wbi_request(
+        http,
+        "https://api.bilibili.com/x/web-interface/wbi/search/type",
+        &[
+            ("__refresh__", "true".to_string()),
+            ("_extra", String::new()),
+            ("context", String::new()),
+            ("page", page.to_string()),
+            ("page_size", "42".to_string()),
+            ("platform", "pc".to_string()),
+            ("highlight", "1".to_string()),
+            ("single_column", "0".to_string()),
+            ("keyword", keyword.to_string()),
+            ("category_id", String::new()),
+            ("search_type", "video".to_string()),
+            ("dynamic_offset", "0".to_string()),
+            ("preload", "true".to_string()),
+            ("com2co", "true".to_string()),
+        ],
+    )
+    .await
+    .unwrap_or_default();
 
-    let mut v = http.get_json::<Value>(&target_url).await.unwrap_or_default();
     if v["data"]["result"].as_array().is_none() {
-        // 若直接请求被风控拦截，回退至 WBI 签名版搜索接口
-        if let Ok(wbi_v) = wrap_wbi_request(
-            http,
-            "https://api.bilibili.com/x/web-interface/wbi/search/type",
-            &[
-                ("__refresh__", "true".to_string()),
-                ("_extra", String::new()),
-                ("context", String::new()),
-                ("page", page.to_string()),
-                ("page_size", "42".to_string()),
-                ("platform", "pc".to_string()),
-                ("highlight", "1".to_string()),
-                ("single_column", "0".to_string()),
-                ("keyword", keyword.to_string()),
-                ("category_id", String::new()),
-                ("search_type", "video".to_string()),
-                ("dynamic_offset", "0".to_string()),
-                ("preload", "true".to_string()),
-                ("com2co", "true".to_string()),
-            ],
-        )
-        .await
-        {
-            v = wbi_v;
+        let encoded_kw = encode_uri_component(keyword);
+        let target_url = format!(
+            "https://api.bilibili.com/x/web-interface/search/type?__refresh__=true&_extra=&context=&page={page}&page_size=42&platform=pc&highlight=1&single_column=0&keyword={encoded_kw}&category_id=&search_type=video&dynamic_offset=0&preload=true&com2co=true"
+        );
+        if let Ok(fallback_v) = http.get_json::<Value>(&target_url).await {
+            v = fallback_v;
         }
     }
 

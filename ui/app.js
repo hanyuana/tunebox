@@ -200,7 +200,172 @@ function switchView(name) {
   document.querySelectorAll(".sidebar .nav-item[data-nav], .mobile-bottom-nav .m-nav-btn[data-nav]").forEach((b) => {
     b.classList.toggle("active", b.dataset.nav === name);
   });
+  if (name === "history") {
+    renderHistoryView();
+  } else if (name === "search") {
+    renderSearchHistory();
+  }
   document.getElementById("content-scroll").scrollTop = 0;
+}
+
+// ========== 历史记录（搜索历史、最近播放、播放状态持久化） ==========
+function getSearchHistory() {
+  return getObj("tunebox_search_history", []);
+}
+
+function addSearchHistory(kw) {
+  const clean = kw.trim();
+  if (!clean) return;
+  const list = getSearchHistory().filter((x) => x !== clean);
+  list.unshift(clean);
+  setObj("tunebox_search_history", list.slice(0, 15));
+  renderSearchHistory();
+}
+
+function removeSearchHistory(kw) {
+  const list = getSearchHistory().filter((x) => x !== kw);
+  setObj("tunebox_search_history", list);
+  renderSearchHistory();
+}
+
+function renderSearchHistory() {
+  const bar = document.getElementById("search-history-bar");
+  if (!bar) return;
+  const list = getSearchHistory();
+  if (!list.length) {
+    bar.innerHTML = "";
+    return;
+  }
+  bar.innerHTML =
+    `<span class="history-label">搜索历史：</span>` +
+    list
+      .map(
+        (kw) =>
+          `<span class="history-chip" data-hkw="${esc(kw)}"><span>${esc(kw)}</span><span class="history-chip-del" data-delkw="${esc(kw)}" title="移除">✕</span></span>`
+      )
+      .join("") +
+    `<button class="btn-ghost btn-xs" id="btn-clear-shistory">清空</button>`;
+
+  bar.querySelectorAll(".history-chip").forEach((chip) => {
+    chip.onclick = (ev) => {
+      if (ev.target.closest(".history-chip-del")) return;
+      const kw = chip.dataset.hkw;
+      document.getElementById("search-input").value = kw;
+      state.searchKeywords = kw;
+      state.searchPage = 1;
+      runSearch(false);
+    };
+  });
+  bar.querySelectorAll(".history-chip-del").forEach((del) => {
+    del.onclick = (ev) => {
+      ev.stopPropagation();
+      removeSearchHistory(del.dataset.delkw);
+    };
+  });
+  const clearBtn = document.getElementById("btn-clear-shistory");
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      setObj("tunebox_search_history", []);
+      renderSearchHistory();
+    };
+  }
+}
+
+function getPlayHistory() {
+  return getObj("tunebox_play_history", []);
+}
+
+function addPlayHistory(track) {
+  if (!track || !track.id) return;
+  const list = getPlayHistory().filter((t) => t.id !== track.id);
+  list.unshift(track);
+  setObj("tunebox_play_history", list.slice(0, 100));
+}
+
+function renderHistoryView() {
+  const box = document.getElementById("history-view-box");
+  if (!box) return;
+  const tracks = getPlayHistory();
+  box.innerHTML = `
+    <div class="playlist-header">
+      <div class="playlist-header-info">
+        <div>
+          <div class="playlist-header-title">🕘 最近播放记录</div>
+          <div class="muted">自动保存最近聆听的 ${tracks.length} 首歌曲（点击即可秒播，已缓存音源直链与歌词）</div>
+        </div>
+        <div class="playlist-header-actions">
+          <button class="btn-primary" id="hist-play-all">▶ 播放全部</button>
+          <button class="btn-ghost" id="hist-clear">清空播放历史</button>
+        </div>
+      </div>
+    </div>
+    ${renderTrackTable(tracks, { showSource: true })}
+  `;
+  document.getElementById("hist-play-all").onclick = () => {
+    if (!tracks.length) return;
+    state.queue = [...tracks];
+    playIndex(0);
+    renderQueue();
+  };
+  document.getElementById("hist-clear").onclick = () => {
+    setObj("tunebox_play_history", []);
+    renderHistoryView();
+    toast("已清空最近播放记录");
+  };
+  bindTrackTableEvents(box, tracks);
+}
+
+function savePlayerState() {
+  setObj("tunebox_player_state", {
+    queue: state.queue.slice(0, 200),
+    currentIndex: state.currentIndex,
+    playMode: state.playMode,
+    volume: audio.volume,
+    lightTheme: document.body.classList.contains("light"),
+  });
+}
+
+function restorePlayerState() {
+  const saved = getObj("tunebox_player_state", null);
+  if (!saved) return;
+  if (saved.lightTheme) {
+    document.body.classList.add("light");
+  }
+  if (typeof saved.volume === "number" && saved.volume >= 0 && saved.volume <= 1) {
+    audio.volume = saved.volume;
+    const vr = document.getElementById("volume-range");
+    if (vr) vr.value = String(Math.round(saved.volume * 100));
+  }
+  if (saved.playMode) {
+    state.playMode = saved.playMode;
+    const icons = { loop: "🔁", one: "🔂", shuffle: "🔀" };
+    const modeBtn = document.getElementById("btn-mode");
+    if (modeBtn && icons[state.playMode]) modeBtn.textContent = icons[state.playMode];
+  }
+  if (Array.isArray(saved.queue) && saved.queue.length) {
+    state.queue = saved.queue;
+    state.currentIndex =
+      typeof saved.currentIndex === "number" &&
+      saved.currentIndex >= 0 &&
+      saved.currentIndex < saved.queue.length
+        ? saved.currentIndex
+        : 0;
+    renderQueue();
+    const cur = state.queue[state.currentIndex];
+    if (cur) {
+      const coverEl = document.getElementById("player-cover");
+      coverEl.onerror = () => {
+        coverEl.src = DEFAULT_COVER;
+      };
+      coverEl.src = coverUrl(cur.img_url);
+      document.getElementById("player-title").textContent = cur.title || "未知歌曲";
+      document.getElementById("player-artist").textContent = cur.artist || "";
+      const badge = document.getElementById("player-badge");
+      badge.style.display = "inline-block";
+      badge.textContent = PLATFORM_LABELS[cur.source] || cur.source;
+      loadLyricForTrack(cur);
+    }
+  }
 }
 
 // ========== 1. 精选歌单 ==========
@@ -251,15 +416,34 @@ async function loadExploreFilters() {
 
 async function loadExplorePlaylists(append = false) {
   const grid = document.getElementById("explore-grid");
+  const moreBtn = document.getElementById("btn-explore-more");
   if (!append) {
+    state.exploreSeenIds = new Set();
     grid.innerHTML = `<div class="muted">加载中…</div>`;
+    if (moreBtn) moreBtn.style.display = "inline-block";
   }
   try {
-    const list = await invoke("api_show_playlist", {
+    const rawList = await invoke("api_show_playlist", {
       source: state.exploreSource,
       offset: state.exploreOffset,
       filterId: state.exploreFilter,
     });
+    const seen = state.exploreSeenIds || (state.exploreSeenIds = new Set());
+    const list = (rawList || []).filter((p) => {
+      if (!p || !p.id) return false;
+      const key = `${p.id}|${(p.title || "").trim()}`;
+      if (seen.has(p.id) || seen.has(key)) return false;
+      seen.add(p.id);
+      seen.add(key);
+      return true;
+    });
+
+    if (append && list.length === 0) {
+      if (moreBtn) moreBtn.style.display = "none";
+      toast("已加载全部歌单，没有更多了");
+      return;
+    }
+
     const html = list
       .map(
         (p) => `
@@ -273,6 +457,9 @@ async function loadExplorePlaylists(append = false) {
       grid.insertAdjacentHTML("beforeend", html);
     } else {
       grid.innerHTML = html || `<div class="muted">暂无歌单（若为 YouTube 请确认代理已连通）</div>`;
+    }
+    if (moreBtn) {
+      moreBtn.style.display = list.length >= 8 ? "inline-block" : "none";
     }
     grid.querySelectorAll(".playlist-card").forEach((card) => {
       card.onclick = () => openPlaylist(card.dataset.pid);
@@ -322,16 +509,38 @@ async function runSearch(append = false) {
       searchType: state.searchType,
     });
     if (state.searchType === "track") {
+      const incoming = res.tracks || [];
       if (!append) {
-        state._searchTracks = res.tracks || [];
+        state._searchTracks = incoming;
       } else {
-        state._searchTracks = (state._searchTracks || []).concat(res.tracks || []);
+        const existingIds = new Set((state._searchTracks || []).map((t) => t.id));
+        const uniqueNew = incoming.filter((t) => t && t.id && !existingIds.has(t.id));
+        if (uniqueNew.length === 0) {
+          moreWrap.style.display = "none";
+          toast("已加载全部搜索结果");
+          return;
+        }
+        state._searchTracks = (state._searchTracks || []).concat(uniqueNew);
       }
       box.innerHTML = renderTrackTable(state._searchTracks, { showSource: true });
       bindTrackTableEvents(box, state._searchTracks);
-      moreWrap.style.display = (res.tracks || []).length >= 10 ? "flex" : "none";
+      moreWrap.style.display = incoming.length >= 10 ? "flex" : "none";
     } else {
-      const pls = res.playlists || [];
+      const rawPls = res.playlists || [];
+      if (!append) {
+        state._searchPlIds = new Set();
+      }
+      const seenPl = state._searchPlIds || (state._searchPlIds = new Set());
+      const pls = rawPls.filter((p) => {
+        if (!p || !p.id || seenPl.has(p.id)) return false;
+        seenPl.add(p.id);
+        return true;
+      });
+      if (append && pls.length === 0) {
+        moreWrap.style.display = "none";
+        toast("已加载全部歌单结果");
+        return;
+      }
       const cards = pls
         .map(
           (p) => `
@@ -503,27 +712,29 @@ function renderTrackTable(tracks, { showSource = true, removableFromListId = nul
 }
 
 function bindTrackTableEvents(container, tracks, removableFromListId = null) {
+  let lastClickTid = "";
+  let lastClickTime = 0;
+
   container.querySelectorAll(".track-row").forEach((row) => {
-    row.addEventListener("click", (ev) => {
-      if (ev.target.closest(".row-ops") || ev.target.closest(".link-cell[data-jump!='']")) return;
+    const handleRowActivate = (ev) => {
+      if (ev.target.closest(".row-ops")) return;
       const idx = Number(row.dataset.idx);
       const track = tracks[idx];
       if (!track) return;
-      // 点击单曲时将当前列表载入队列并立即播放
+      // 防抖：用户双击（两次 click 间隔 < 450ms）同一行时只触发一次播放，防止第二次 click 中断第一次的 audio.play()
+      const now = Date.now();
+      if (track.id === lastClickTid && now - lastClickTime < 450) {
+        return;
+      }
+      lastClickTid = track.id;
+      lastClickTime = now;
+
       state.queue = [...tracks];
       playIndex(idx);
       renderQueue();
-    });
-  });
-
-  container.querySelectorAll(".link-cell").forEach((cell) => {
-    const target = cell.dataset.jump;
-    if (target) {
-      cell.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        openPlaylist(target);
-      });
-    }
+    };
+    row.addEventListener("click", handleRowActivate);
+    row.addEventListener("dblclick", handleRowActivate);
   });
 
   container.querySelectorAll(".op-add-my").forEach((btn) => {
@@ -562,8 +773,20 @@ function bindTrackTableEvents(container, tracks, removableFromListId = null) {
   }
 }
 
-// ========== 4. 播放器核心与歌词同步 ==========
+// ========== 4. 播放器核心与歌词同步（含 YouTube 官方 IFrame 桥接） ==========
 const audio = document.getElementById("audio-el");
+let currentPlayToken = 0;
+let usingYtEmbed = false;
+let ytPlaying = false;
+let ytCurrentTime = 0;
+let ytDuration = 0;
+
+function sendYtCmd(payload) {
+  const frame = document.getElementById("yt-bridge-frame");
+  if (frame && frame.contentWindow) {
+    frame.contentWindow.postMessage(payload, "*");
+  }
+}
 
 async function playIndex(idx) {
   if (!state.queue.length) return;
@@ -573,12 +796,27 @@ async function playIndex(idx) {
   const track = state.queue[idx];
   if (!track) return;
 
-  // 切换曲目时先暂停上一首，防止异步请求期间旧音频继续发声
+  const myToken = ++currentPlayToken;
+
+  // 切换曲目时先暂停上一首（包括 HTML5 Audio 与 YouTube IFrame）
   audio.pause();
+  if (usingYtEmbed) {
+    sendYtCmd({ cmd: "stop" });
+    usingYtEmbed = false;
+    ytPlaying = false;
+  }
   document.getElementById("btn-play").textContent = "▶";
 
-  // 更新界面信息
-  document.getElementById("player-cover").src = coverUrl(track.img_url);
+  // 记录到最近播放历史并持久化播放状态
+  addPlayHistory(track);
+  savePlayerState();
+
+  // 更新界面信息（带封面加载失败自动兜底，防止出现裂图图标）
+  const coverEl = document.getElementById("player-cover");
+  coverEl.onerror = () => {
+    coverEl.src = DEFAULT_COVER;
+  };
+  coverEl.src = coverUrl(track.img_url);
   document.getElementById("player-title").textContent = track.title || "未知歌曲";
   document.getElementById("player-artist").textContent = track.artist || "";
   const badge = document.getElementById("player-badge");
@@ -595,8 +833,19 @@ async function playIndex(idx) {
 
   try {
     const sound = await invoke("api_bootstrap_track", { track });
-    // 确保等待期间用户没有切歌
-    if (state.queue[state.currentIndex]?.id !== track.id) return;
+    // 若等待期间已有新的播放请求，直接丢弃旧结果
+    if (myToken !== currentPlayToken) return;
+
+    if (sound.url && sound.url.startsWith("yt-embed://")) {
+      const vid = sound.url.slice("yt-embed://".length);
+      usingYtEmbed = true;
+      badge.textContent = "YouTube · 网页引擎";
+      sendYtCmd({ cmd: "volume", val: Math.round(audio.volume * 100) });
+      sendYtCmd({ cmd: "load", vid });
+      document.getElementById("btn-play").textContent = "⏸";
+      return;
+    }
+
     if (sound.platform && sound.platform !== track.source) {
       badge.textContent = `${PLATFORM_LABELS[track.source] || track.source} → ${PLATFORM_LABELS[sound.platform] || sound.platform}`;
     } else {
@@ -604,22 +853,37 @@ async function playIndex(idx) {
     }
     audio.src = sound.url;
     await audio.play();
+    if (myToken !== currentPlayToken) return;
     document.getElementById("btn-play").textContent = "⏸";
   } catch (e) {
+    if (myToken !== currentPlayToken) return;
+    const errMsg = String(e || "");
+    if (errMsg.includes("AbortError") || errMsg.includes("interrupted")) {
+      return;
+    }
     badge.textContent = `${PLATFORM_LABELS[track.source] || track.source} · 不可用`;
-    toast(`${track.title}: ${e}`);
-    // 自动跳下一首（防止死循环：仅当队列大于 1 首时）
+    toast(`${track.title}: ${errMsg}`);
     if (state.queue.length > 1) {
       setTimeout(() => {
-        if (state.queue[state.currentIndex]?.id === track.id) {
+        if (myToken === currentPlayToken && state.queue[state.currentIndex]?.id === track.id) {
           playNext(true);
         }
-      }, 1200);
+      }, 1500);
     }
   }
 }
 
 function togglePlay() {
+  if (usingYtEmbed) {
+    if (ytPlaying) {
+      sendYtCmd({ cmd: "pause" });
+      document.getElementById("btn-play").textContent = "▶";
+    } else {
+      sendYtCmd({ cmd: "play" });
+      document.getElementById("btn-play").textContent = "⏸";
+    }
+    return;
+  }
   if (!audio.src) {
     if (state.queue.length) playIndex(Math.max(0, state.currentIndex));
     return;
@@ -636,8 +900,13 @@ function togglePlay() {
 function playNext(auto = false) {
   if (!state.queue.length) return;
   if (auto && state.playMode === "one") {
-    audio.currentTime = 0;
-    audio.play().catch(() => {});
+    if (usingYtEmbed) {
+      sendYtCmd({ cmd: "seek", time: 0 });
+      sendYtCmd({ cmd: "play" });
+    } else {
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    }
     return;
   }
   if (state.playMode === "shuffle" && state.queue.length > 1) {
@@ -848,10 +1117,23 @@ async function init() {
   state.providers = boot.providers;
   state.settings = boot.settings;
 
+  // 初始化左下角默认封面与 YouTube 官方 IFrame 桥接页面
+  const coverEl = document.getElementById("player-cover");
+  coverEl.onerror = () => {
+    coverEl.src = DEFAULT_COVER;
+  };
+  coverEl.src = DEFAULT_COVER;
+  const ytFrame = document.getElementById("yt-bridge-frame");
+  if (ytFrame && state.streamPort) {
+    ytFrame.src = `http://127.0.0.1:${state.streamPort}/yt_bridge`;
+  }
+
   renderSidebarPlaylists();
   renderExplorePlatformTabs();
   renderSearchPlatformTabs();
+  renderSearchHistory();
   fillSettingsForm();
+  restorePlayerState();
   await loadExploreFilters();
   await loadExplorePlaylists(false);
 
@@ -869,9 +1151,9 @@ async function init() {
     }
   };
 
-  // 精选歌单加载更多
+  // 精选歌单加载更多（步长 50，确保兼容各平台分页粒度并配合前端 ID 去重）
   document.getElementById("btn-explore-more").onclick = () => {
-    state.exploreOffset += 35;
+    state.exploreOffset += 50;
     loadExplorePlaylists(true);
   };
 
@@ -880,6 +1162,7 @@ async function init() {
     ev.preventDefault();
     const kw = document.getElementById("search-input").value.trim();
     if (!kw) return;
+    addSearchHistory(kw);
     state.searchKeywords = kw;
     state.searchPage = 1;
     switchView("search");
@@ -962,6 +1245,7 @@ async function init() {
   // 主题切换
   document.getElementById("btn-theme").onclick = () => {
     document.body.classList.toggle("light");
+    savePlayerState();
   };
 
   // 右侧抽屉
@@ -1013,13 +1297,65 @@ async function init() {
     draggingProg = true;
   });
   prog.addEventListener("change", () => {
-    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+    if (usingYtEmbed && ytDuration > 0) {
+      const targetSec = (Number(prog.value) / 1000) * ytDuration;
+      sendYtCmd({ cmd: "seek", time: targetSec });
+    } else if (Number.isFinite(audio.duration) && audio.duration > 0) {
       audio.currentTime = (Number(prog.value) / 1000) * audio.duration;
     }
     draggingProg = false;
   });
 
+  // 接收来自 YouTube IFrame 桥接器的播放状态与进度事件
+  window.addEventListener("message", async (ev) => {
+    const d = ev.data || {};
+    if (!usingYtEmbed) return;
+    if (d.type === "yt-time") {
+      ytCurrentTime = d.currentTime || 0;
+      ytDuration = d.duration || 0;
+      document.getElementById("time-current").textContent = formatTime(ytCurrentTime);
+      document.getElementById("time-duration").textContent = formatTime(ytDuration);
+      if (!draggingProg && ytDuration > 0) {
+        prog.value = String(Math.floor((ytCurrentTime / ytDuration) * 1000));
+      }
+      syncLyric(ytCurrentTime);
+    } else if (d.type === "yt-state") {
+      if (d.state === 1) {
+        ytPlaying = true;
+        document.getElementById("btn-play").textContent = "⏸";
+      } else if (d.state === 2) {
+        ytPlaying = false;
+        document.getElementById("btn-play").textContent = "▶";
+      } else if (d.state === 0) {
+        ytPlaying = false;
+        playNext(true);
+      }
+    } else if (d.type === "yt-error") {
+      // 若该 YouTube 视频禁止嵌入播放，自动触发跨平台备选音源（B站 / 酷我）兜底
+      const curTrack = state.queue[state.currentIndex];
+      if (!curTrack) return;
+      usingYtEmbed = false;
+      const badge = document.getElementById("player-badge");
+      try {
+        const sound = await invoke("api_bootstrap_track", {
+          track: { ...curTrack, disabled: true },
+          forceRefresh: true,
+        });
+        if (sound.url && !sound.url.startsWith("yt-embed://")) {
+          badge.textContent = `YouTube → ${PLATFORM_LABELS[sound.platform] || sound.platform}`;
+          audio.src = sound.url;
+          await audio.play();
+          document.getElementById("btn-play").textContent = "⏸";
+          return;
+        }
+      } catch {}
+      badge.textContent = "YouTube · 不可用";
+      toast("该 YouTube 视频受限且未找到备选音源");
+    }
+  });
+
   audio.addEventListener("timeupdate", () => {
+    if (usingYtEmbed) return;
     document.getElementById("time-current").textContent = formatTime(audio.currentTime);
     document.getElementById("time-duration").textContent = formatTime(audio.duration);
     if (!draggingProg && Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -1027,19 +1363,24 @@ async function init() {
     }
     syncLyric(audio.currentTime);
   });
-  audio.addEventListener("ended", () => playNext(true));
+  audio.addEventListener("ended", () => {
+    if (!usingYtEmbed) playNext(true);
+  });
   audio.addEventListener("play", () => {
-    document.getElementById("btn-play").textContent = "⏸";
+    if (!usingYtEmbed) document.getElementById("btn-play").textContent = "⏸";
   });
   audio.addEventListener("pause", () => {
-    document.getElementById("btn-play").textContent = "▶";
+    if (!usingYtEmbed) document.getElementById("btn-play").textContent = "▶";
   });
 
   // 音量
   const volRange = document.getElementById("volume-range");
   audio.volume = 0.8;
   volRange.addEventListener("input", () => {
-    audio.volume = Number(volRange.value) / 100;
+    const v = Number(volRange.value);
+    audio.volume = v / 100;
+    if (usingYtEmbed) sendYtCmd({ cmd: "volume", val: v });
+    savePlayerState();
   });
 
   // 监听来自托盘和全局快捷键的事件

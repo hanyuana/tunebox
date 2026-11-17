@@ -8,8 +8,10 @@ use crate::http::{urlencode, Http};
 use crate::models::*;
 use crate::settings::Settings;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(desktop)]
@@ -24,6 +26,8 @@ pub struct AppState {
     pub settings: RwLock<Settings>,
     pub settings_path: PathBuf,
     pub stream_port: u16,
+    pub sound_cache: RwLock<HashMap<String, (Instant, Sound)>>,
+    pub lyric_cache: RwLock<HashMap<String, Lyric>>,
 }
 
 #[derive(Serialize)]
@@ -41,6 +45,9 @@ pub struct BootstrapInfo {
 }
 
 fn proxied_stream_url(port: u16, raw_url: &str) -> String {
+    if raw_url.starts_with("yt-embed://") {
+        return raw_url.to_string();
+    }
     format!("http://127.0.0.1:{port}/stream?url={}", urlencode(raw_url))
 }
 
@@ -142,13 +149,31 @@ async fn api_get_playlist(state: State<'_, AppState>, list_id: String) -> Result
         .map_err(|e| e.to_string())
 }
 
-/// 清洗歌名以便跨平台匹配（去除括号附加词与大小写差异）
+/// 清洗歌名以便跨平台匹配（支持提取《...》内核心歌名，并剔除前后括号附加信息）
 fn normalize_song_title(s: &str) -> String {
     let lower = s.trim().to_lowercase();
-    let base = lower
+    if let (Some(l), Some(r)) = (lower.find('《'), lower.find('》')) {
+        if l + '《'.len_utf8() < r {
+            let inner = lower[l + '《'.len_utf8()..r].trim();
+            if !inner.is_empty() {
+                return inner.to_string();
+            }
+        }
+    }
+    // 剔除前导 【...】 或 [...] 标签
+    let mut rest = lower.as_str();
+    while let Some(stripped) = rest.strip_prefix('【') {
+        if let Some(end) = stripped.find('】') {
+            rest = stripped[end + '】'.len_utf8()..]
+                .trim_start_matches([' ', '|', '｜', '-', '—', ':']);
+        } else {
+            break;
+        }
+    }
+    let base = rest
         .split(['(', '（', '-', '—', '【', '['])
         .next()
-        .unwrap_or(&lower)
+        .unwrap_or(rest)
         .trim();
     if base.is_empty() {
         lower
@@ -157,28 +182,120 @@ fn normalize_song_title(s: &str) -> String {
     }
 }
 
-/// 获取歌曲可播放地址；若原平台失败且开启了「自动换源」，依次从备选平台搜索同名同歌手曲目替换
+/// 通过 GD Studio 320k SVIP 解析池解锁全网 VIP 曲目（校验原唱歌手与完整文件大小）
+async fn unblock_vip_via_parser(http: &Http, track: &Track, require_artist: bool) -> Option<Sound> {
+    let clean_title = normalize_song_title(&track.title);
+    let clean_artist = track.artist.trim().to_lowercase();
+    let query = if clean_artist.is_empty() || clean_artist == "未知" {
+        track.title.clone()
+    } else {
+        format!("{} {}", track.title, track.artist)
+    };
+    let search_url = format!(
+        "https://music-api.gdstudio.xyz/api.php?types=search&source=netease&name={}&count=5&pages=1",
+        urlencode(&query)
+    );
+    let list: serde_json::Value = http.get_json(&search_url).await.ok()?;
+    let arr = list.as_array()?;
+
+    for item in arr {
+        let name = item["name"].as_str().unwrap_or_default();
+        let cand_clean = normalize_song_title(name);
+        if clean_title.is_empty()
+            || cand_clean.is_empty()
+            || !(cand_clean.contains(&clean_title) || clean_title.contains(&cand_clean))
+        {
+            continue;
+        }
+        if require_artist && !clean_artist.is_empty() && clean_artist != "未知" {
+            let artists_str = item["artist"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join("/")
+                        .to_lowercase()
+                })
+                .unwrap_or_default();
+            let first_part = clean_artist
+                .split(['/', '&', '、', ',', ' '])
+                .next()
+                .unwrap_or(&clean_artist)
+                .trim();
+            if !first_part.is_empty() && !artists_str.contains(first_part) {
+                continue;
+            }
+        }
+        let id = match &item["id"] {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => continue,
+        };
+        let url_api = format!(
+            "https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id={id}&br=320"
+        );
+        if let Ok(u_data) = http.get_json::<serde_json::Value>(&url_api).await {
+            let play_url = u_data["url"].as_str().unwrap_or_default();
+            let size = u_data["size"].as_u64().unwrap_or(0);
+            if play_url.starts_with("http") && size > 1_000_000 {
+                return Some(Sound {
+                    url: play_url.to_string(),
+                    bitrate: "320kbps".to_string(),
+                    platform: "VIP解析".to_string(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// 获取歌曲可播放地址（含 15 分钟内存缓存）；支持全平台 VIP 自动解析与多源无损/完整版替换
 #[tauri::command]
-async fn api_bootstrap_track(state: State<'_, AppState>, track: Track) -> Result<Sound, String> {
+async fn api_bootstrap_track(
+    state: State<'_, AppState>,
+    track: Track,
+    force_refresh: Option<bool>,
+) -> Result<Sound, String> {
     let http = state.http.clone();
     let port = state.stream_port;
 
-    if !track.disabled {
+    if !force_refresh.unwrap_or(false) {
+        if let Ok(guard) = state.sound_cache.read() {
+            if let Some((ts, cached)) = guard.get(&track.id) {
+                if ts.elapsed() < Duration::from_secs(15 * 60) {
+                    return Ok(cached.clone());
+                }
+            }
+        }
+    }
+
+    // 1. 尝试原平台直接解析（即使 track.disabled 为 true 也会尝试，因为 netease 等已内置 VIP 解析）
+    if !force_refresh.unwrap_or(false) {
         if let Ok(mut sound) = providers::bootstrap_track(&http, &track).await {
             if !sound.url.is_empty() {
                 sound.url = proxied_stream_url(port, &sound.url);
+                if let Ok(mut guard) = state.sound_cache.write() {
+                    guard.insert(track.id.clone(), (Instant::now(), sound.clone()));
+                }
                 return Ok(sound);
             }
         }
     }
 
-    let auto_choose = state.settings.read().map(|s| s.auto_choose_source).unwrap_or(true);
-    if !auto_choose || track.source == "youtube" {
-        return Err("当前歌曲无法播放（可能为 VIP 专享或无版权）".into());
+    // 2. 尝试通过 320k SVIP 解析池解锁同名同原唱歌曲
+    if track.source != "youtube" {
+        if let Some(mut sound) = unblock_vip_via_parser(&http, &track, true).await {
+            sound.url = proxied_stream_url(port, &sound.url);
+            if let Ok(mut guard) = state.sound_cache.write() {
+                guard.insert(track.id.clone(), (Instant::now(), sound.clone()));
+            }
+            return Ok(sound);
+        }
     }
 
-    // 固定按全量高可用音源顺序依次兜底（优先酷我与 B站，保证 VIP 曲目也能顺畅播放）
-    let failover_sources = ["kuwo", "bilibili", "netease", "qq", "kugou", "migu"];
+    // 3. 依次从高可用音源（优先 B站 Hi-Res 完整版与酷我）搜索同名曲目替换
+    let failover_sources = ["bilibili", "kuwo", "netease", "qq", "kugou", "migu"];
     let clean_title = normalize_song_title(&track.title);
     let query = if track.artist.trim().is_empty() || track.artist == "未知" {
         track.title.clone()
@@ -193,24 +310,34 @@ async fn api_bootstrap_track(state: State<'_, AppState>, track: Track) -> Result
         let Ok(res) = providers::search(&http, src, &query, 1, SearchType::Track).await else {
             continue;
         };
-        for (idx, cand) in res.tracks.iter().take(6).enumerate() {
-            if cand.disabled {
-                continue;
-            }
+        for cand in res.tracks.iter().take(6) {
             let cand_clean = normalize_song_title(&cand.title);
-            let title_match = idx == 0
-                || (!clean_title.is_empty()
-                    && (cand_clean.contains(&clean_title) || clean_title.contains(&cand_clean)));
+            let raw_lower = cand.title.to_lowercase();
+            let title_match = !clean_title.is_empty()
+                && ((cand_clean.contains(&clean_title) || clean_title.contains(&cand_clean))
+                    || raw_lower.contains(&clean_title));
             if !title_match {
                 continue;
             }
             if let Ok(mut sound) = providers::bootstrap_track(&http, cand).await {
                 if !sound.url.is_empty() {
                     sound.url = proxied_stream_url(port, &sound.url);
+                    if let Ok(mut guard) = state.sound_cache.write() {
+                        guard.insert(track.id.clone(), (Instant::now(), sound.clone()));
+                    }
                     return Ok(sound);
                 }
             }
         }
+    }
+
+    // 4. 最终兜底：放宽歌手限制从 VIP 解析池获取同名 320k 曲目
+    if let Some(mut sound) = unblock_vip_via_parser(&http, &track, false).await {
+        sound.url = proxied_stream_url(port, &sound.url);
+        if let Ok(mut guard) = state.sound_cache.write() {
+            guard.insert(track.id.clone(), (Instant::now(), sound.clone()));
+        }
+        return Ok(sound);
     }
 
     Err("当前歌曲在所有备选音源均无法播放".into())
@@ -218,9 +345,20 @@ async fn api_bootstrap_track(state: State<'_, AppState>, track: Track) -> Result
 
 #[tauri::command]
 async fn api_lyric(state: State<'_, AppState>, track: Track) -> Result<Lyric, String> {
-    providers::lyric(&state.http, &track)
+    if let Ok(guard) = state.lyric_cache.read() {
+        if let Some(cached) = guard.get(&track.id) {
+            return Ok(cached.clone());
+        }
+    }
+    let res = providers::lyric(&state.http, &track)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if !res.lyric.is_empty() {
+        if let Ok(mut guard) = state.lyric_cache.write() {
+            guard.insert(track.id.clone(), res.clone());
+        }
+    }
+    Ok(res)
 }
 
 #[tauri::command]
@@ -388,6 +526,8 @@ pub fn run() {
             settings: RwLock::new(settings),
             settings_path,
             stream_port,
+            sound_cache: RwLock::new(HashMap::new()),
+            lyric_cache: RwLock::new(HashMap::new()),
         });
 
         #[cfg(desktop)]

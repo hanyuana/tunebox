@@ -9,7 +9,7 @@ use axum::{
     body::Body,
     extract::{Query, State},
     http::{HeaderMap, HeaderValue, StatusCode},
-    response::Response,
+    response::{Html, Response},
     routing::get,
     Router,
 };
@@ -21,10 +21,94 @@ pub struct StreamQuery {
     pub url: String,
 }
 
+const YT_BRIDGE_HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+<style>html,body,#player{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+let player = null;
+let ready = false;
+let pendingVid = null;
+let timer = null;
+
+function notify(msg) {
+  window.parent.postMessage(msg, "*");
+}
+
+window.onYouTubeIframeAPIReady = function() {
+  player = new YT.Player('player', {
+    width: '200',
+    height: '200',
+    playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1 },
+    events: {
+      onReady: function() {
+        ready = true;
+        if (pendingVid) {
+          player.loadVideoById(pendingVid);
+          pendingVid = null;
+        }
+      },
+      onStateChange: function(e) {
+        notify({ type: 'yt-state', state: e.data });
+      },
+      onError: function(e) {
+        notify({ type: 'yt-error', code: e.data });
+      }
+    }
+  });
+  clearInterval(timer);
+  timer = setInterval(function() {
+    if (ready && player && typeof player.getCurrentTime === 'function') {
+      const st = player.getPlayerState ? player.getPlayerState() : -1;
+      if (st === 1 || st === 2) {
+        notify({
+          type: 'yt-time',
+          currentTime: player.getCurrentTime() || 0,
+          duration: player.getDuration() || 0
+        });
+      }
+    }
+  }, 400);
+};
+
+window.addEventListener('message', function(ev) {
+  const d = ev.data || {};
+  if (d.cmd === 'load') {
+    if (ready && player && player.loadVideoById) {
+      player.loadVideoById(d.vid);
+    } else {
+      pendingVid = d.vid;
+    }
+  } else if (d.cmd === 'play' && ready && player) {
+    player.playVideo();
+  } else if (d.cmd === 'pause' && ready && player) {
+    player.pauseVideo();
+  } else if (d.cmd === 'stop' && ready && player) {
+    player.stopVideo();
+  } else if (d.cmd === 'seek' && ready && player) {
+    player.seekTo(d.time || 0, true);
+  } else if (d.cmd === 'volume' && ready && player) {
+    player.setVolume(d.val ?? 80);
+  }
+});
+
+const tag = document.createElement('script');
+tag.src = "https://www.youtube.com/iframe_api";
+document.head.appendChild(tag);
+</script>
+</body>
+</html>"#;
+
 pub async fn spawn_stream_server(http: Arc<Http>) -> u16 {
     let app = Router::new()
         .route("/stream", get(handle_stream))
         .route("/img", get(handle_stream))
+        .route("/yt_bridge", get(|| async { Html(YT_BRIDGE_HTML) }))
         .with_state(http);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

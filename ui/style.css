@@ -299,9 +299,38 @@ html, body {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .search-type-switch { display: flex; gap: 6px; }
+
+.search-history-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.search-history-bar:empty { display: none; }
+.history-label { font-size: 12px; color: var(--text-muted); margin-right: 2px; }
+.history-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.history-chip:hover { border-color: var(--accent); color: var(--accent); }
+.history-chip-del {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+.history-chip-del:hover { color: #f87171; }
 
 .playlist-header {
   display: flex;
@@ -361,7 +390,6 @@ html, body {
 }
 .track-row { cursor: pointer; transition: background 0.12s; }
 .track-row:hover { background: var(--bg-hover); }
-.track-row.disabled { opacity: 0.48; }
 .track-row.playing { color: var(--accent); font-weight: 600; }
 
 .link-cell { cursor: pointer; }

@@ -480,14 +480,20 @@ pub async fn get_playlist(http: &Http, list_id: &str) -> Result<Playlist> {
 pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
     let song_id = track.id.strip_prefix("kwtrack_").unwrap_or(&track.id);
 
-    // 1. 优先使用速度最快、成功率最高的酷我 antiserver 接口
+    let is_valid_kw_url = |u: &str| -> bool {
+        u.starts_with("http")
+            && !u.contains("588957081.mp3")
+            && !u.contains("/nf/resource/")
+    };
+
+    // 1. 优先使用速度最快的酷我 antiserver 接口（过滤掉 588957081.mp3 付费提示音）
     for proto in ["http", "https"] {
         let anti_url = format!(
             "{proto}://antiserver.kuwo.cn/anti.s?type=convert_url&rid=MUSIC_{song_id}&format=mp3|aac&response=url"
         );
         if let Ok(text) = http.get_text(&anti_url).await {
             let trimmed = text.trim();
-            if trimmed.starts_with("http") {
+            if is_valid_kw_url(trimmed) {
                 return Ok(Sound {
                     url: trimmed.to_string(),
                     bitrate: "128kbps".to_string(),
@@ -503,7 +509,7 @@ pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
     );
     if let Ok(resp) = kw_cookie_get(http, &target_url).await {
         let url = val_str(&resp["data"]["url"]);
-        if url.starts_with("http") {
+        if is_valid_kw_url(&url) {
             return Ok(Sound {
                 url,
                 bitrate: String::new(),
@@ -518,7 +524,7 @@ pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
     );
     if let Ok(resp) = http.get_json::<Value>(&mobi_url).await {
         let url = val_str(&resp["data"]["url"]);
-        if url.starts_with("http") {
+        if is_valid_kw_url(&url) {
             let br = val_str(&resp["data"]["bitrate"]);
             return Ok(Sound {
                 url,

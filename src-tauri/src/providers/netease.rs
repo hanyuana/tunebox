@@ -177,7 +177,7 @@ fn parse_api_track(song_info: &Value) -> Track {
         source: "netease".to_string(),
         source_url: format!("https://music.163.com/#/song?id={id}"),
         img_url: val_str(&al["picUrl"]),
-        disabled: !is_playable(song_info),
+        disabled: false,
         extra: Default::default(),
     }
 }
@@ -476,26 +476,42 @@ pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
         "ids": format!("[{song_id}]"),
         "br": 999000,
     });
-    let form = eapi(eapi_url, &d)?;
-    http.set_cookie("https://interface3.music.163.com", "os=pc");
-
-    let res_data: Value = http.post_form_json(target_url, &form).await?;
-    let item = res_data["data"]
-        .as_array()
-        .and_then(|a| a.first())
-        .ok_or_else(|| anyhow!("网易云未返回播放地址"))?;
-    let url = item["url"].as_str().unwrap_or_default();
-    if url.is_empty() {
-        bail!("网易云歌曲无可用播放地址: {}", track.id);
+    if let Ok(form) = eapi(eapi_url, &d) {
+        http.set_cookie("https://interface3.music.163.com", "os=pc");
+        if let Ok(res_data) = http.post_form_json::<Value>(target_url, &form).await {
+            if let Some(item) = res_data["data"].as_array().and_then(|a| a.first()) {
+                let url = item["url"].as_str().unwrap_or_default();
+                let is_trial = !item["freeTrialInfo"].is_null();
+                if !url.is_empty() && !is_trial {
+                    let br = item["br"].as_f64().unwrap_or(0.0);
+                    let bitrate = format!("{}kbps", (br / 1000.0).round() as i64);
+                    return Ok(Sound {
+                        url: url.to_string(),
+                        bitrate,
+                        platform: "netease".to_string(),
+                    });
+                }
+            }
+        }
     }
-    let br = item["br"].as_f64().unwrap_or(0.0);
-    let bitrate = format!("{}kbps", (br / 1000.0).round() as i64);
 
-    Ok(Sound {
-        url: url.to_string(),
-        bitrate,
-        platform: "netease".to_string(),
-    })
+    // VIP 歌曲自动无损/320k 解析（过滤掉小于 1MB 的试听片段）
+    let vip_url = format!(
+        "https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id={song_id}&br=320"
+    );
+    if let Ok(vip_data) = http.get_json::<Value>(&vip_url).await {
+        let u = val_str(&vip_data["url"]);
+        let size = vip_data["size"].as_u64().unwrap_or(0);
+        if u.starts_with("http") && size > 1_000_000 {
+            return Ok(Sound {
+                url: u,
+                bitrate: "320kbps".to_string(),
+                platform: "VIP解析".to_string(),
+            });
+        }
+    }
+
+    bail!("网易云歌曲无可用播放地址: {}", track.id)
 }
 
 pub async fn search(

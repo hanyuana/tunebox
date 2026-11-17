@@ -398,12 +398,18 @@ pub async fn bootstrap_track(http: &Http, track: &Track) -> Result<Sound> {
         }
     }
 
-    // 兜底：若用户本机安装了 yt-dlp，调用它拿真实地址
+    // 兜底 1：若用户本机安装了 yt-dlp，调用它拿真实地址
     if let Ok(sound) = ytdlp_fallback(vid).await {
         return Ok(sound);
     }
 
-    bail!("无法获取 YouTube 音频流（请检查海外代理是否连通）")
+    // 兜底 2：当代理节点 IP 被 YouTube 标记触发 BotGuard 验证（"Sign in to confirm you're not a bot"）时，
+    // 返回 yt-embed:// 协议交由前端内置的 YouTube 官方 IFrame Player (WebView2 环境自带完整 BotGuard) 播放
+    Ok(Sound {
+        url: format!("yt-embed://{vid}"),
+        bitrate: "YT-Web".into(),
+        platform: "youtube".into(),
+    })
 }
 
 fn pick_best_audio(player_json: &Value) -> Option<Sound> {
@@ -451,10 +457,11 @@ fn pick_best_audio(player_json: &Value) -> Option<Sound> {
 
 async fn ytdlp_fallback(vid: &str) -> Result<Sound> {
     let url = format!("https://www.youtube.com/watch?v={vid}");
-    let out = tokio::process::Command::new("yt-dlp")
-        .args(["-f", "bestaudio[ext=m4a]/bestaudio", "-g", "--no-playlist", &url])
-        .output()
-        .await?;
+    let mut cmd = tokio::process::Command::new("yt-dlp");
+    cmd.args(["-f", "bestaudio[ext=m4a]/bestaudio", "-g", "--no-playlist", &url]);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW，防止弹出黑框
+    let out = cmd.output().await?;
     if !out.status.success() {
         bail!("yt-dlp 退出失败");
     }

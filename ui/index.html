@@ -34,6 +34,9 @@
         <button class="nav-item" data-nav="search">
           <span class="nav-icon">⌕</span><span>聚合检索</span>
         </button>
+        <button class="nav-item" data-nav="history">
+          <span class="nav-icon">🕘</span><span>最近播放</span>
+        </button>
         <button class="nav-item" data-nav="open-url">
           <span class="nav-icon">🔗</span><span>链接直达</span>
         </button>
@@ -99,10 +102,16 @@
               <button class="chip" data-stype="playlist">歌单</button>
             </div>
           </div>
+          <div id="search-history-bar" class="search-history-bar"></div>
           <div id="search-results"></div>
           <div class="load-more-wrap" id="search-more-wrap" style="display:none">
             <button class="btn-ghost" id="btn-search-more">加载下一页</button>
           </div>
+        </section>
+
+        <!-- 2.5 最近播放历史视图 -->
+        <section class="view" id="view-history">
+          <div id="history-view-box"></div>
         </section>
 
         <!-- 3. 歌单详情视图 -->
@@ -178,6 +187,7 @@
       <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
         <button class="m-nav-btn active" data-nav="explore">✦ 广场</button>
         <button class="m-nav-btn" data-nav="search">⌕ 搜索</button>
+        <button class="m-nav-btn" data-nav="history">🕘 历史</button>
         <button class="m-nav-btn" data-nav="open-url">🔗 链接</button>
         <button class="m-nav-btn" data-nav="settings">⚙ 设置</button>
       </nav>
@@ -207,7 +217,7 @@
   <!-- 底部播放控制栏 -->
   <footer class="player-bar">
     <div class="player-track" id="player-track-info">
-      <img id="player-cover" class="player-cover" src="" alt="" />
+      <img id="player-cover" class="player-cover" src="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20120%20120%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%230f172a%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231e1b4b%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%22120%22%20height%3D%22120%22%20fill%3D%22url(%23g)%22%2F%3E%3Cg%20stroke%3D%22%2322d3ee%22%20stroke-width%3D%225%22%20stroke-linecap%3D%22round%22%3E%3Cline%20x1%3D%2238%22%20y1%3D%2250%22%20x2%3D%2238%22%20y2%3D%2270%22%2F%3E%3Cline%20x1%3D%2249%22%20y1%3D%2240%22%20x2%3D%2249%22%20y2%3D%2280%22%2F%3E%3Cline%20x1%3D%2260%22%20y1%3D%2232%22%20x2%3D%2260%22%20y2%3D%2288%22%2F%3E%3Cline%20x1%3D%2271%22%20y1%3D%2243%22%20x2%3D%2271%22%20y2%3D%2277%22%2F%3E%3Cline%20x1%3D%2282%22%20y1%3D%2252%22%20x2%3D%2282%22%20y2%3D%2268%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E" alt="" />
       <div class="player-meta">
         <div class="player-title" id="player-title">未在播放</div>
         <div class="player-artist" id="player-artist">选择一首歌曲开始聆听</div>
@@ -237,6 +247,7 @@
     </div>
 
     <audio id="audio-el" preload="auto" crossorigin="anonymous"></audio>
+    <iframe id="yt-bridge-frame" style="width:1px;height:1px;position:fixed;bottom:0;left:0;opacity:0.01;pointer-events:none;border:0" allow="autoplay"></iframe>
   </footer>
 
   <!-- 添加到自建歌单弹窗 -->
